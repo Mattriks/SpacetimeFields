@@ -14,6 +14,6 @@ Pkg.build("SpacetimeFields")
 ```
 
 ## Documentation
-Documentation with examples is available [here](../blob/master/docs/build/index.md)
+Documentation with examples is available [here](../master/docs/build/index.md)
 
 
