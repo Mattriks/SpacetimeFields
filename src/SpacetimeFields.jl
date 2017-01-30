@@ -5,7 +5,7 @@ import Base.convert, Base.copy, Base.show
 
 export extent, stfield
 export copy, llgrid, nc2field, convert, show
-
+export array2field
 
 """
 extent(xmin, xmax, ymin, ymax)
@@ -43,10 +43,10 @@ end
 
 
 """
-llgrid(fname::ASCIIString; start=[1], count=[-1])
+llgrid(fname::String; start=[1], count=[-1])
 Read a NetCDF file with the given fname, and return  a grid of longitude and latitude values 
 """
-function llgrid(fname::ASCIIString; start=[1], count=[-1] )
+function llgrid(fname::String; start=[1], count=[-1] )
     lon = ncread(fname,"lon", start, count)
     lat = ncread(fname, "lat", start, count)
     ll = vcat([ [i j ] for i in lon, j in lat ]...)
@@ -61,22 +61,23 @@ Return a grid of longitude and latitude values from a `stfield` object
 """
 function llgrid(x::stfield)
     ll = vcat([ [i j ] for i in x.lon, j in x.lat ]...)
-    return ll
+    lli = vcat([ [i j ] for i in 1:length(x.lon), j in 1:length(x.lat) ]...)
+    return ll, lli
 end
 
 
 """
-nc2field{T<:ASCIIString}(fname::T, varname::T, ext::extent)
+nc2field{T<:String}(fname::T, varname::T, ext::extent)
 Convert NetCDF data to a `stfield` object
 """
-function nc2field{T<:ASCIIString}(fname::T, varname::T, ext::extent)
+function nc2field{T<:String}(fname::T, varname::T, ext::extent)
     ll,lli = llgrid(fname)
     imin = indmin( hypot(ll[:,1]-ext.xmin, ll[:,2]-ext.ymin ) )
     imax = indmin( hypot(ll[:,1]-ext.xmax, ll[:,2]-ext.ymax ) )
 
     a = lli[imin,:]
     b = lli[imax,:]
-    d = abs(b - a) + [1 1]
+    d = abs(b - a) .+ [1 1]
 #    dump(a);    dump(b); dump(d)
     if sign(b[2]-a[2])==-1
         a[2] = b[2]
@@ -90,6 +91,26 @@ function nc2field{T<:ASCIIString}(fname::T, varname::T, ext::extent)
     lat = ncread(fname, "lat", a[2:2], d[2:2])
     time = collect(1:size(a1, 3))
     return stfield(a1, lon, lat, good, time)
+end
+
+function array2field{T<:Vector{Float32}}( field::Array{Float32}, lon::T, lat::T,  ext::extent)
+
+    ll = vcat([ [i j] for i in lon, j in lat ]...)
+    lli = vcat([ [i j ] for i in 1:length(lon), j in 1:length(lat) ]...)
+
+    imin = indmin( hypot(ll[:,1]-ext.xmin, ll[:,2]-ext.ymin ) )
+    imax = indmin( hypot(ll[:,1]-ext.xmax, ll[:,2]-ext.ymax ) )
+
+    a = lli[imin,:];    b = lli[imax,:]
+#    dump(a); dump(b)    
+    
+    data = field[a[1]:b[1], a[2]:b[2], :]
+    lon = lon[a[1]:b[1]]
+    lat = lat[a[2]:b[2]]
+    good = trues(length(data[:,:,1]))
+    time = collect(1:size(field, 3))
+
+    return stfield(data, lon, lat, good, time)    
 end
 
 
@@ -138,8 +159,6 @@ function show(io::IO,x::stfield)
     print("Latitude: "); println(x.lat')
     print("Time: "); println(x.time')
 end
-
-
 
 
 end # module
