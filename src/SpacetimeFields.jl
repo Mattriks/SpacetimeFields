@@ -70,19 +70,19 @@ end
 nc2field{T<:String}(fname::T, varname::T, ext::extent)
 Convert NetCDF data to a `stfield` object
 """
-function nc2field{T<:String}(fname::T, varname::T, ext::extent)
+function nc2field(fname::T, varname::T, ext::extent) where {T <: String}
     ll,lli = llgrid(fname)
-    imin = indmin( hypot(ll[:,1]-ext.xmin, ll[:,2]-ext.ymin ) )
-    imax = indmin( hypot(ll[:,1]-ext.xmax, ll[:,2]-ext.ymax ) )
+    imin = indmin( hypot.(ll[:,1]-ext.xmin, ll[:,2]-ext.ymin ) )
+    imax = indmin( hypot.(ll[:,1]-ext.xmax, ll[:,2]-ext.ymax ) )
 
     a = lli[imin,:]
     b = lli[imax,:]
-    d = abs(b - a) .+ [1 1]
+    d = abs.(b - a) .+ [1 1]
 #    dump(a);    dump(b); dump(d)
     if sign(b[2]-a[2])==-1
         a[2] = b[2]
     end
-    start = [a[1],a[2],1]; count = [d[1], d[2], -1]
+    start = [a[1], a[2], 1]; count = [d[1], d[2], -1]
     a1 = ncread(fname, varname, start=start, count=count);
     miss_value = ncgetatt(fname, varname,"missing_value")
     good = vec(a1[:,:,1] .≠ miss_value)
@@ -93,13 +93,13 @@ function nc2field{T<:String}(fname::T, varname::T, ext::extent)
     return stfield(a1, lon, lat, good, time)
 end
 
-function array2field{T<:Vector{Float32}}( field::Array{Float32}, lon::T, lat::T,  ext::extent)
+function array2field( field::Array{Float32}, lon::T, lat::T,  ext::extent) where {T <: Vector{Float32}}
 
     ll = vcat([ [i j] for i in lon, j in lat ]...)
     lli = vcat([ [i j ] for i in 1:length(lon), j in 1:length(lat) ]...)
 
-    imin = indmin( hypot(ll[:,1]-ext.xmin, ll[:,2]-ext.ymin ) )
-    imax = indmin( hypot(ll[:,1]-ext.xmax, ll[:,2]-ext.ymax ) )
+    imin = indmin( hypot.(ll[:,1]-ext.xmin, ll[:,2]-ext.ymin ) )
+    imax = indmin( hypot.(ll[:,1]-ext.xmax, ll[:,2]-ext.ymax ) )
 
     a = lli[imin,:];    b = lli[imax,:]
 #    dump(a); dump(b)    
@@ -152,7 +152,7 @@ end
 show(io::IO,x::stfield)
 Display info about a `stfield` object
 """
-function show(io::IO,x::stfield)
+function show(io::IO, x::stfield)
     println(typeof(x))
     print("Data: "); print(typeof(x.data)); println(size(x.data))
     print("Longitude: "); println(x.lon')
