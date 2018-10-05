@@ -1,6 +1,7 @@
 module SpacetimeFields
 
-using NetCDF, DataFrames
+using NetCDF, DataFrames, Statistics
+ncm = NetCDF
 import Base.convert, Base.copy, Base.show
 
 export extent, stfield
@@ -8,10 +9,11 @@ export copy, llgrid, nc2field, convert, show
 export array2field
 
 """
-extent(xmin, xmax, ymin, ymax)
+    extent(xmin, xmax, ymin, ymax)
+
 An `extent` object
 """
-type extent
+struct extent
     xmin::Float64
     xmax::Float64
     ymin::Float64
@@ -20,10 +22,11 @@ end
 
 
 """
-stfield(data, lon, lat, good, time)
+    stfield(data, lon, lat, good, time)
+
 A `stfield` object
 """
-type stfield
+mutable struct stfield
     data::Array
     lon::Vector
     lat::Vector
@@ -33,18 +36,20 @@ end
 
 
 """
-copy(x::stfield; layers=1)
+    copy(x::stfield; layers::AbstractVector=[1])
+
 Creates a copy of an `stfield` object
 """
-function copy(x::stfield; layers=1)
+function copy(x::stfield; layers::AbstractVector=[1])
     m1 = x.data[:,:,layers]
     stfield(m1, x.lon, x.lat, x.good, collect(layers))
 end
 
 
 """
-llgrid(fname::String; start=[1], count=[-1])
-Read a NetCDF file with the given fname, and return  a grid of longitude and latitude values 
+    llgrid(fname::String; start=[1], count=[-1])
+
+Read a NetCDF file with the given `fname`, and return  a grid of longitude and latitude values 
 """
 function llgrid(fname::String; start=[1], count=[-1] )
     lon = ncread(fname,"lon", start, count)
@@ -56,7 +61,8 @@ end
 
 
 """
-llgrid(x::stfield)
+    llgrid(x::stfield)
+
 Return a grid of longitude and latitude values from a `stfield` object
 """
 function llgrid(x::stfield)
@@ -67,39 +73,48 @@ end
 
 
 """
-nc2field{T<:String}(fname::T, varname::T, ext::extent)
-Convert NetCDF data to a `stfield` object
+    nc2field(fname::String, varname::String, ext::extent; mean_dims::AbstractVector)
+
+Convert NetCDF data to a `stfield` object, after averaging over dimensions `mean_dims` (optional)
 """
-function nc2field(fname::T, varname::T, ext::extent) where {T <: String}
+function nc2field(fname::String, varname::String, ext::extent; mean_dims::AbstractVector=[])
     ll,lli = llgrid(fname)
-    imin = indmin( hypot.(ll[:,1]-ext.xmin, ll[:,2]-ext.ymin ) )
-    imax = indmin( hypot.(ll[:,1]-ext.xmax, ll[:,2]-ext.ymax ) )
+    imin = argmin( hypot.(ll[:,1].-ext.xmin, ll[:,2].-ext.ymin ) )
+    imax = argmin( hypot.(ll[:,1].-ext.xmax, ll[:,2].-ext.ymax ) )
 
     a = lli[imin,:]
     b = lli[imax,:]
-    d = abs.(b - a) .+ [1 1]
-#    dump(a);    dump(b); dump(d)
-    if sign(b[2]-a[2])==-1
-        a[2] = b[2]
-    end
-    start = [a[1], a[2], 1]; count = [d[1], d[2], -1]
-    a1 = ncread(fname, varname, start=start, count=count);
+    d = abs.(b - a) .+ [1,1]
+    sign(b[2]-a[2])==-1 && (a[2] = b[2])
+    ncf = ncm.open(fname)
+    start = ncm.defaultstart(ncf[varname])
+    count = -ncm.defaultstart(ncf[varname])
+    start[1:2] = a; count[1:2] = d
+    a1 = ncm.readvar(ncf[varname], start=start, count=count)
+    !isempty(mean_dims) && (a1 = mean(a1, dims=mean_dims))
+    a1 = dropdims(a1, dims=(findall(size(a1).== 1)...,))
+    
     miss_value = ncgetatt(fname, varname,"missing_value")
     good = vec(a1[:,:,1] .≠ miss_value)
-    
-    lon = ncread(fname,"lon", a[1:1], d[1:1])
-    lat = ncread(fname, "lat", a[2:2], d[2:2])
+    lon = ncm.readvar(ncf["lon"], start=a[1:1], count=d[1:1])
+    lat = ncm.readvar(ncf["lat"], start=a[2:2], count=d[2:2])
     time = collect(1:size(a1, 3))
+    ncm.close(ncf)
     return stfield(a1, lon, lat, good, time)
 end
 
-function array2field( field::Array{Float32}, lon::T, lat::T,  ext::extent) where {T <: Vector{Float32}}
+"""
+    array2field(field::AbstractArray, lon, lat, ext::extent)
+
+Convert a 3d-array to a `stfield` object 
+"""
+function array2field(field::AbstractArray, lon::T, lat::T,  ext::extent) where {T<:AbstractVector}
 
     ll = vcat([ [i j] for i in lon, j in lat ]...)
     lli = vcat([ [i j ] for i in 1:length(lon), j in 1:length(lat) ]...)
 
-    imin = indmin( hypot.(ll[:,1]-ext.xmin, ll[:,2]-ext.ymin ) )
-    imax = indmin( hypot.(ll[:,1]-ext.xmax, ll[:,2]-ext.ymax ) )
+    imin = argmin( hypot.(ll[:,1].-ext.xmin, ll[:,2].-ext.ymin ) )
+    imax = argmin( hypot.(ll[:,1].-ext.xmax, ll[:,2].-ext.ymax ) )
 
     a = lli[imin,:];    b = lli[imax,:]
 #    dump(a); dump(b)    
@@ -115,7 +130,8 @@ end
 
 
 """
-convert(::Type{Matrix}, x::stfield)
+    convert(::Type{Matrix}, x::stfield)
+
 Convert `stfield` object to a `Matrix`.
 """
 function convert(::Type{Matrix}, x::stfield)
@@ -127,29 +143,32 @@ end
 
 
 """
-convert(::Type{DataFrame}, x::stfield, time)
+    convert(::Type{DataFrame}, x::stfield, time::AbstractVector)
+
 Convert `stfield` object to a `DataFrame`
 """
-function convert(::Type{DataFrame}, x::stfield, time)
-    ll = vcat([ [i j ] for i in x.lon, j in x.lat ]...)[x.good,:]     
-    D = vcat( [ DataFrame(lon=ll[:,1],lat=ll[:,2], z = x.data[:,:,k][x.good], g="$k") for k in time]...) 
+function convert(::Type{DataFrame}, x::stfield, time::AbstractVector)
+    ll = vcat([[i j ] for i in x.lon, j in x.lat ]...)[x.good,:]     
+    D = vcat( [DataFrame(lon=ll[:,1],lat=ll[:,2], z = x.data[:,:,k][x.good], g="$k") for k in time]...) 
     return D
 end
 
 
 """
-convert(::Type{DataFrame}, x::stfield, time, label)
+    convert(::Type{DataFrame}, x::stfield, time, label::Vector{String})
+
 Convert `stfield` object to a `DataFrame`
 """
-function convert(::Type{DataFrame}, x::stfield, time, label)
-    ll = vcat([ [i j ] for i in x.lon, j in x.lat ]...)[x.good,:]     
-    D = vcat( [ DataFrame(lon=ll[:,1],lat=ll[:,2], z = x.data[:,:,k][x.good], g=label[k]) for k in time]...) 
+function convert(::Type{DataFrame}, x::stfield, time, label::Vector{String})
+    ll = vcat([ [i j] for i in x.lon, j in x.lat ]...)[x.good,:]     
+    D = vcat( [DataFrame(lon=ll[:,1], lat=ll[:,2], z=x.data[:,:,k][x.good], g=label[k]) for k in time]...) 
     return D
 end
 
 
 """
-show(io::IO,x::stfield)
+    show(io::IO,x::stfield)
+
 Display info about a `stfield` object
 """
 function show(io::IO, x::stfield)
