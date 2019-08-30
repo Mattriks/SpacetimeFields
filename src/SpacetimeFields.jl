@@ -6,7 +6,7 @@ import Base.convert, Base.copy, Base.show
 
 export extent, stfield
 export copy, llgrid, nc2field, convert, show
-export array2field
+export field2ts, array2field
 
 """
     extent(xmin, xmax, ymin, ymax)
@@ -51,9 +51,9 @@ end
 
 Read a NetCDF file with the given `fname`, and return  a grid of longitude and latitude values 
 """
-function llgrid(fname::String; start=[1], count=[-1] )
-    lon = ncread(fname,"lon", start, count)
-    lat = ncread(fname, "lat", start, count)
+function llgrid(fname::String; start=[1], count=[-1], llnames::Vector{String}=["lat","lon"])
+    lon = ncread(fname, llnames[1], start, count)
+    lat = ncread(fname, llnames[2], start, count)
     ll = vcat([ [i j ] for i in lon, j in lat ]...)
     lli = vcat([ [i j ] for i in 1:length(lon), j in 1:length(lat) ]...)
     return ll, lli
@@ -73,17 +73,17 @@ end
 
 
 """
-    nc2field(fname::String, varname::String, ext::extent; mean_dims::AbstractVector)
+    nc2field(fname::String, varname::String, ext::extent; mean_dims=[], llnames=["lat","lon"])
 
 Convert NetCDF data to a `stfield` object, after averaging over dimensions `mean_dims` (optional)
 """
-function nc2field(fname::String, varname::String, ext::extent; mean_dims::AbstractVector=[])
-    ll,lli = llgrid(fname)
+function nc2field(fname::String, varname::String, ext::extent; mean_dims::AbstractVector=[],
+        llnames::Vector{String}=["lat","lon"])
+    ll,lli = llgrid(fname, llnames=llnames)
     imin = argmin( hypot.(ll[:,1].-ext.xmin, ll[:,2].-ext.ymin ) )
     imax = argmin( hypot.(ll[:,1].-ext.xmax, ll[:,2].-ext.ymax ) )
 
-    a = lli[imin,:]
-    b = lli[imax,:]
+    a, b = lli[imin,:], lli[imax,:]
     d = abs.(b - a) .+ [1,1]
     sign(b[2]-a[2])==-1 && (a[2] = b[2])
     ncf = ncm.open(fname)
@@ -96,8 +96,8 @@ function nc2field(fname::String, varname::String, ext::extent; mean_dims::Abstra
     
     miss_value = ncgetatt(fname, varname,"missing_value")
     good = vec(a1[:,:,1] .≠ miss_value)
-    lon = ncm.readvar(ncf["lon"], start=a[1:1], count=d[1:1])
-    lat = ncm.readvar(ncf["lat"], start=a[2:2], count=d[2:2])
+    lon = ncm.readvar(ncf[llnames[1]], start=a[1:1], count=d[1:1])
+    lat = ncm.readvar(ncf[llnames[2]], start=a[2:2], count=d[2:2])
     time = collect(1:size(a1, 3))
     ncm.close(ncf)
     return stfield(a1, lon, lat, good, time)
@@ -126,6 +126,14 @@ function array2field(field::AbstractArray, lon::T, lat::T,  ext::extent) where {
     time = collect(1:size(field, 3))
 
     return stfield(data, lon, lat, good, time)    
+end
+
+
+function field2ts(st::stfield, lon::T, lat::T) where T<:AbstractVector
+    ll, lli = llgrid(st)
+    gi = [argmin(hypot.(ll[:,1].-x, ll[:,2].-y)) for (x,y) in zip(lon, lat)]
+    x, y = lli[gi,:]
+    return st.data[x,y,:]
 end
 
 
