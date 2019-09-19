@@ -51,11 +51,11 @@ end
 
 Read a NetCDF file with the given `fname`, and return  a grid of longitude and latitude values 
 """
-function llgrid(fname::String; start=[1], count=[-1], llnames::Vector{String}=["lat","lon"])
-    lon = ncread(fname, llnames[1], start, count)
-    lat = ncread(fname, llnames[2], start, count)
-    ll = vcat([ [i j ] for i in lon, j in lat ]...)
-    lli = vcat([ [i j ] for i in 1:length(lon), j in 1:length(lat) ]...)
+function llgrid(fname::String; start=[1], count=[-1], llnames::Vector{String}=["lon","lat"])
+    la = ncread(fname, llnames[1], start, count)
+    lb = ncread(fname, llnames[2], start, count)
+    ll = vcat([ [i j ] for i in la, j in lb ]...)
+    lli = vcat([ [i j ] for i in 1:length(la), j in 1:length(lb) ]...)
     return ll, lli
 end
 
@@ -77,8 +77,13 @@ end
 
 Convert NetCDF data to a `stfield` object, after averaging over dimensions `mean_dims` (optional)
 """
-function nc2field(fname::String, varname::String, ext::extent; mean_dims::AbstractVector=[],
-        llnames::Vector{String}=["lat","lon"])
+function nc2field(fname::String, varname::String, ext::extent; mean_dims::AbstractVector=[], llnames::Vector{String}=String[])
+    
+    ncf = ncm.open(fname)
+    v = ncf.vars[varname]
+    dimnames = getfield.(v.dim, :name)
+    isempty(llnames) && (llnames = dimnames[1:2])
+
     ll,lli = llgrid(fname, llnames=llnames)
     imin = argmin( hypot.(ll[:,1].-ext.xmin, ll[:,2].-ext.ymin ) )
     imax = argmin( hypot.(ll[:,1].-ext.xmax, ll[:,2].-ext.ymax ) )
@@ -86,7 +91,7 @@ function nc2field(fname::String, varname::String, ext::extent; mean_dims::Abstra
     a, b = lli[imin,:], lli[imax,:]
     d = abs.(b - a) .+ [1,1]
     sign(b[2]-a[2])==-1 && (a[2] = b[2])
-    ncf = ncm.open(fname)
+
     start = ncm.defaultstart(ncf[varname])
     count = -ncm.defaultstart(ncf[varname])
     start[1:2] = a; count[1:2] = d
